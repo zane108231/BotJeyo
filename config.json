@@ -1,0 +1,23 @@
+{
+  "PAGE_ACCESS_TOKEN": "EAA5b2tSotcABO81ZA8PcXTcsWGJilJ0JnMVvrZBd192ZAoUUTSCFFGBKZBBjH5ZAdNhKrx6VkhUPprdQjHyK67LvxewflBXfkMOxNZBpLRMt9gpa4GEzXaMaMwv8b7lJrJ7jMzl1SZADOBLCCs9rdQlKBrewvdPav5CXQefe7pZBlyo5oDTNstydl8ZC4T1RtB2o5qQQfkOdsxYMv1YFVLQZDZD",
+  "VERIFY_TOKEN": "woon",
+  "ADMINS": [
+    "9932556420127801"
+  ],
+  "BOTNAME": "StrawberryCake",
+  "PREFIX": "/",
+  "THEME_SETUP": {
+    "THEME": "Fiery",
+    "ADMIN": "JihyoWoon",
+    "TITLE": "StrawberryCake",
+    "HTML": [
+      "#CE2F16",
+      "#fe8916",
+      "#ff952a"
+    ]
+  },
+  "selfListen": false,
+  "markAsSeen": true,
+  "clearData": false,
+  "maintenance": false
+}
