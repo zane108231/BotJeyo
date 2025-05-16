@@ -11,7 +11,7 @@ module.exports.config = {
   selfListen: false
 };
 
-module.exports.run = async function({ event }) {
+module.exports.onPostback = async function({ event }) {
   try {
     // Only handle postback events
     if (event.type !== 'postback') return;
