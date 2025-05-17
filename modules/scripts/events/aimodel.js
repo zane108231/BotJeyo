@@ -9,6 +9,7 @@ module.exports.config = {
 const axios = require('axios');
 const sendMessage = require("../../../page/src/sendMessage");
 const sendTypingIndicator = require("../../../page/src/sendTypingIndicator");
+const cooldownManager = require("../utils/cooldownManager");
 
 // Store user preferences
 const userPreferences = new Map();
@@ -240,9 +241,27 @@ module.exports.onPostback = async function({ event }) {
         const selectedModel = Object.values(AI_MODELS).find(model => model.payload === event.postback.payload);
         
         if (selectedModel) {
-            // Store user's model selection
-            userPreferences.set(event.sender.id, selectedModel);
-            await sendMsg(`✅ You've selected ${selectedModel.name}. You can now chat with me!`, event.sender.id);
+            // Check if user can execute postback
+            const { canExecute, message } = cooldownManager.checkPostbackCooldown(event.sender.id, event.postback.payload);
+            if (!canExecute) {
+                await sendMsg(message, event.sender.id);
+                return;
+            }
+
+            // Lock postback execution
+            cooldownManager.lockPostback(event.sender.id, event.postback.payload);
+
+            try {
+                // Store user's model selection
+                userPreferences.set(event.sender.id, selectedModel);
+                await sendMsg(`✅ You've selected ${selectedModel.name}. You can now chat with me!`, event.sender.id);
+
+                // Set cooldown (3 seconds)
+                cooldownManager.setPostbackCooldown(event.sender.id, event.postback.payload, 3);
+            } finally {
+                // Unlock postback execution
+                cooldownManager.unlockPostback(event.sender.id);
+            }
         }
     } catch (error) {
         console.error("[AI Model] Selection error:", error);

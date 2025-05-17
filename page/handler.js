@@ -2,33 +2,8 @@ const fs = require("fs");
 const path = require("path");
 const config = require("../config.json");
 const { getTheme } = require("../website/web.js");
-const cooldowns = {}; // Track cooldowns for each user and command
 const state = require("./state");
-const commandHandler = require("../modules/scripts/utils/commandHandler");
-
-// Helper function to check if user can execute command
-async function canExecuteCommand(userId, commandName) {
-    // If user is already executing a command
-    if (state.executingCommands.has(userId)) {
-        const currentCommand = state.executingCommands.get(userId);
-        return {
-            canExecute: false,
-            message: `⏳ Please wait for your current command (${currentCommand}) to finish before using another command.`
-        };
-    }
-
-    return { canExecute: true };
-}
-
-// Helper function to lock command execution
-function lockCommand(userId, commandName) {
-    state.executingCommands.set(userId, commandName);
-}
-
-// Helper function to unlock command execution
-function unlockCommand(userId) {
-    state.executingCommands.delete(userId);
-}
+const cooldownManager = require("../modules/scripts/utils/cooldownManager");
 
 module.exports = async function (event) {
     const modulesPath = path.join(__dirname, "../modules/scripts/commands");
@@ -54,44 +29,52 @@ module.exports = async function (event) {
     if (event.postback) {
         console.log("[Handler] Received postback:", event.postback);
         
-        // Check if user is executing a command
-        if (state.executingCommands.has(event.sender.id)) {
-            const currentCommand = state.executingCommands.get(event.sender.id);
-            await api.sendMessage(`⏳ Please wait for your current command (${currentCommand}) to finish before using another command.`, event.sender.id);
+        // Check if user can execute postback
+        const { canExecute, message } = await cooldownManager.checkPostbackCooldown(event.sender.id, event.postback.payload);
+        if (!canExecute) {
+            await api.sendMessage(message, event.sender.id);
             return;
         }
 
-        // Load all event modules
-        const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith(".js"));
-        let handled = false;
+        try {
+            // Load all event modules
+            const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith(".js"));
+            let handled = false;
 
-        // First try welcomemessage.js for START_CHAT and HELP_PAYLOAD
-        if (event.postback.payload === 'START_CHAT' || event.postback.payload === 'HELP_PAYLOAD') {
-            const welcomeModule = require("../modules/scripts/events/welcomemessage");
-            if (welcomeModule.onPostback) {
-                try {
-                    await welcomeModule.onPostback({ event });
-                    handled = true;
-                } catch (error) {
-                    console.error("Error handling postback in welcomemessage.js:", error);
-                }
-            }
-        }
-
-        // If not handled by welcomemessage.js, try other event files
-        if (!handled) {
-            for (const file of eventFiles) {
-                const eventModulePath = path.join(eventsPath, file);
-                const ev = require(eventModulePath);
-
-                if (ev.onPostback) {
+            // First try welcomemessage.js for START_CHAT and HELP_PAYLOAD
+            if (event.postback.payload === 'START_CHAT' || event.postback.payload === 'HELP_PAYLOAD') {
+                const welcomeModule = require("../modules/scripts/events/welcomemessage");
+                if (welcomeModule.onPostback) {
                     try {
-                        await ev.onPostback({ event });
+                        await welcomeModule.onPostback({ event });
+                        handled = true;
                     } catch (error) {
-                        console.error(`Error handling postback in ${file}:`, error);
+                        console.error("Error handling postback in welcomemessage.js:", error);
                     }
                 }
             }
+
+            // If not handled by welcomemessage.js, try other event files
+            if (!handled) {
+                for (const file of eventFiles) {
+                    const eventModulePath = path.join(eventsPath, file);
+                    const ev = require(eventModulePath);
+
+                    if (ev.onPostback) {
+                        try {
+                            await ev.onPostback({ event });
+                        } catch (error) {
+                            console.error(`Error handling postback in ${file}:`, error);
+                        }
+                    }
+                }
+            }
+
+            // Set cooldown for the postback (default 3 seconds)
+            cooldownManager.setPostbackCooldown(event.sender.id, event.postback.payload, 3);
+        } catch (error) {
+            console.error("[Handler] Postback error:", error);
+            await api.sendMessage("❌ An error occurred while processing your request. Please try again.", event.sender.id);
         }
         return; // Exit after handling postback
     }
@@ -144,9 +127,42 @@ module.exports = async function (event) {
 
             if (command.config.name.toLowerCase() === commandName) {
                 console.log(getTheme().gradient(`SYSTEM:`), `${command.config.name} command was executed!`);
-                const result = await commandHandler.executeCommand(command, event, args, isAdmin);
-                if (!result.success) {
-                    await api.sendMessage(result.message, event.sender.id);
+                
+                // Check command cooldown
+                const { onCooldown, remainingTime } = cooldownManager.checkCommandCooldown(
+                    event.sender.id, 
+                    commandName, 
+                    command.config.cooldown || 0,
+                    isAdmin
+                );
+
+                if (onCooldown) {
+                    await api.sendMessage(`Please wait ${remainingTime} second(s) before using this command again.`, event.sender.id);
+                    return;
+                }
+
+                // Check if user can execute command
+                const { canExecute, message } = await cooldownManager.checkCommandLock(event.sender.id, commandName);
+                if (!canExecute) {
+                    await api.sendMessage(message, event.sender.id);
+                    return;
+                }
+
+                // Lock command execution
+                cooldownManager.lockCommand(event.sender.id, commandName);
+
+                try {
+                    // Update cooldown
+                    cooldownManager.updateCommandCooldown(event.sender.id, commandName, isAdmin);
+
+                    // Execute command
+                    await command.run({ event, args });
+                } catch (error) {
+                    console.error(`Error executing ${commandName}:`, error);
+                    await api.sendMessage("An error occurred while executing the command.", event.sender.id);
+                } finally {
+                    // Unlock command execution
+                    cooldownManager.unlockCommand(event.sender.id);
                 }
                 return; // Exit after handling command
             }

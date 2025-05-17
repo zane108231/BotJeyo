@@ -255,4 +255,40 @@ async function handleCarouselPost(post, event, sendAttach) {
 // Export the userData map and handler functions for use in the postback handler
 module.exports.userData = userData;
 module.exports.handleStories = handleStories;
-module.exports.handlePosts = handlePosts; 
+module.exports.handlePosts = handlePosts;
+
+// Handle postback events
+module.exports.onPostback = async function({ event }) {
+  try {
+    const sendMsg = sendMessage(event);
+    const typingIndicator = sendTypingIndicator(event);
+    const sendAttach = sendAttachment(event);
+
+    if (event.postback.payload.startsWith('igstalk_')) {
+      const [_, action, username] = event.postback.payload.split('_');
+      
+      // Show typing indicator
+      await typingIndicator(true, event.sender.id);
+      
+      // Get stored data for this user
+      const userStoredData = userData.get(event.sender.id);
+      if (!userStoredData) {
+        await sendMsg("❌ No data found. Please search for the profile again.", event.sender.id);
+        return;
+      }
+
+      if (action === 'stories') {
+        await handleStories(userStoredData.stories, event, sendMsg, sendAttach);
+      } else if (action === 'posts') {
+        await handlePosts(userStoredData.posts, event, sendMsg, sendAttach);
+      }
+      
+      // Stop typing indicator
+      await typingIndicator(false, event.sender.id);
+    }
+  } catch (error) {
+    console.error('[IGStalk] Postback error:', error);
+    const sendMsg = sendMessage(event);
+    await sendMsg("❌ Error processing your request. Please try again.", event.sender.id);
+  }
+}; 

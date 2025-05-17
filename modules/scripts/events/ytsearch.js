@@ -2,15 +2,17 @@ const sendMessage = require("../../../page/src/sendMessage");
 const sendTypingIndicator = require("../../../page/src/sendTypingIndicator");
 const sendAttachment = require("../../../page/src/sendAttachment");
 const ytsearch = require("../commands/ytsearch");
+const cooldownManager = require("../utils/cooldownManager");
 
 module.exports.config = {
-  name: "YTSearch Reply Handler",
+  name: "YTSearch Event Handler",
   author: "PageBot",
   version: "1.0",
-  description: "Handles reply messages for YTSearch command",
+  description: "Handles reply and postback events for YTSearch command",
   selfListen: false
 };
 
+// Handle regular messages
 module.exports.run = async function({ event }) {
   try {
     // Only handle message_reply events
@@ -68,25 +70,23 @@ module.exports.run = async function({ event }) {
     // Clear stored results
     ytsearch.userSearches.delete(event.sender.id);
 
-    // Stop typing indicator
-    await typingIndicator(false, event.sender.id);
-
   } catch (error) {
     console.error('[YTSearch] Reply Error:', error);
     const sendMsg = sendMessage(event);
     await sendMsg("❌ Error: Could not process the video. Please try again later.", event.sender.id);
+  } finally {
+    // Stop typing indicator
+    const typingIndicator = sendTypingIndicator(event);
+    await typingIndicator(false, event.sender.id);
   }
 };
 
-module.exports.config = {
-  name: "YTSearch Postback Handler",
-  author: "PageBot",
-  version: "1.0",
-  description: "Handles postback events for YTSearch command",
-  selfListen: false
-};
+// Handle postback events
+module.exports.onPostback = async function({ event }) {
+  const sendMsg = sendMessage(event);
+  const typingIndicator = sendTypingIndicator(event);
+  const sendAttach = sendAttachment(event);
 
-module.exports.run = async function({ event }) {
   try {
     // Only handle postback events
     if (event.type !== 'postback') return;
@@ -96,9 +96,15 @@ module.exports.run = async function({ event }) {
 
     console.log('[YTSearch] Received postback:', payload);
 
-    const sendMsg = sendMessage(event);
-    const typingIndicator = sendTypingIndicator(event);
-    const sendAttach = sendAttachment(event);
+    // Check if user can execute postback
+    const { canExecute, message } = cooldownManager.checkPostbackCooldown(event.sender.id, payload);
+    if (!canExecute) {
+      await sendMsg(message, event.sender.id);
+      return;
+    }
+
+    // Lock postback execution
+    cooldownManager.lockPostback(event.sender.id, payload);
 
     // Extract video ID from payload
     const videoId = payload.replace('ytsearch_download_', '');
@@ -116,12 +122,16 @@ module.exports.run = async function({ event }) {
     // Send the video
     await sendAttach('video', streamUrl, event.sender.id);
 
-    // Stop typing indicator
-    await typingIndicator(false, event.sender.id);
+    // Set cooldown (3 seconds)
+    cooldownManager.setPostbackCooldown(event.sender.id, payload, 3);
 
   } catch (error) {
     console.error('[YTSearch] Postback Error:', error);
-    const sendMsg = sendMessage(event);
     await sendMsg("❌ Error: Could not process the video. Please try again later.", event.sender.id);
+  } finally {
+    // Stop typing indicator
+    await typingIndicator(false, event.sender.id);
+    // Unlock postback execution
+    cooldownManager.unlockPostback(event.sender.id);
   }
 }; 

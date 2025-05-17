@@ -4,6 +4,7 @@ const parser = require("body-parser");
 const express = require("express");
 const path = require("path");
 const app = express();
+const monitor = require('./modules/scripts/utils/monitor');
 
 app.use(parser.json());
 app.use(express.static("website"));
@@ -26,6 +27,19 @@ setTimeout(() => {
   });
 }, 5000);
 
+// Start the bot
+async function startBot() {
+    try {
+        // Start system monitoring (updates every 5 seconds)
+        monitor.start();
+        
+        // ... rest of your startup code ...
+    } catch (error) {
+        console.error('Failed to start bot:', error);
+    }
+}
+
 app.listen(8080, () => {
   web.log();
+   //startBot(); // Uncomment this line to start the bot monitoring
 });

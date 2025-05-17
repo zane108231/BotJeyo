@@ -1,5 +1,8 @@
 const state = require("../../../page/state");
 const config = require("../../../config.json");
+const cooldownManager = require("./cooldownManager");
+const monitor = require('./monitor');
+const loadTester = require('./loadTester');
 
 // Helper function to check if user can execute command
 async function canExecuteCommand(userId, commandName) {
@@ -55,7 +58,7 @@ function updateCooldown(userId, commandName, isAdmin) {
     }
 }
 
-// Helper function to track command usage
+// Track command usage
 function trackCommandUsage(commandName, userId) {
     if (!state.commandUsage.has(commandName)) {
         state.commandUsage.set(commandName, new Set());
@@ -64,45 +67,68 @@ function trackCommandUsage(commandName, userId) {
 }
 
 // Main function to execute command
-async function executeCommand(command, event, args, isAdmin) {
-    const commandName = command.config.name;
+async function executeCommand(event, command, commandName, isAdmin) {
     const cooldownTime = command.config.cooldown || 0;
 
+    // Track command usage
+    monitor.trackCommand(commandName);
+
     // Check cooldown
-    const { onCooldown, remainingTime } = checkCooldown(event.sender.id, commandName, cooldownTime, isAdmin);
+    const { onCooldown, remainingTime } = cooldownManager.checkCommandCooldown(
+        event.sender.id,
+        commandName,
+        cooldownTime,
+        isAdmin
+    );
+
     if (onCooldown) {
         return {
             success: false,
-            message: `Please wait ${remainingTime} second(s) before using this command again.`
+            message: `Please wait ${remainingTime} seconds before using this command again.`
         };
     }
 
-    // Check if user can execute command
-    const { canExecute, message } = await canExecuteCommand(event.sender.id, commandName);
+    // Check if command is already being executed
+    const { canExecute, message } = await cooldownManager.checkCommandLock(event.sender.id, commandName);
     if (!canExecute) {
         return { success: false, message };
     }
 
-    // Lock command execution
-    lockCommand(event.sender.id, commandName);
-
     try {
+        // Lock the command
+        cooldownManager.lockCommand(event.sender.id, commandName);
+
+        // Execute the command
+        const result = await command.run({ event, args: event.message.text.split(" ").slice(1) });
+
         // Update cooldown
-        updateCooldown(event.sender.id, commandName, isAdmin);
+        cooldownManager.updateCommandCooldown(event.sender.id, commandName, isAdmin);
 
-        // Track command usage
-        trackCommandUsage(commandName, event.sender.id);
-
-        // Execute command
-        await command.run({ event, args });
-        return { success: true };
+        return {
+            success: true,
+            result
+        };
     } catch (error) {
-        console.error(`Error executing ${commandName}:`, error);
-        return { success: false, message: "An error occurred while executing the command." };
+        console.error(`Error executing command ${commandName}:`, error);
+        return {
+            success: false,
+            message: "An error occurred while executing the command."
+        };
     } finally {
-        // Unlock command execution
-        unlockCommand(event.sender.id);
+        // Always unlock the command
+        cooldownManager.unlockCommand(event.sender.id);
     }
+}
+
+async function handleCommand(event, command, args, isAdmin) {
+    const { message, sender } = event;
+    const commandText = message.text.toLowerCase();
+    
+    // Track command usage
+    monitor.trackCommand(commandText);
+
+    // Handle all commands through executeCommand
+    return await executeCommand(event, command, command.config.name, isAdmin);
 }
 
 module.exports = {
@@ -112,5 +138,6 @@ module.exports = {
     checkCooldown,
     updateCooldown,
     trackCommandUsage,
-    executeCommand
+    executeCommand,
+    handleCommand
 }; 
